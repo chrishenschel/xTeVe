@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"xteve/src/internal/authentication"
 
@@ -121,16 +122,28 @@ func Index(w http.ResponseWriter, r *http.Request) {
 func Stream(w http.ResponseWriter, r *http.Request) {
 
 	var path = strings.Replace(r.RequestURI, "/stream/", "", 1)
+	// var waitForOtherStreamsToQuit bool = false
+
 	//var stream = strings.SplitN(path, "-", 2)
 	if path == "current" {
 		if Data.CurrentPlaying != "" {
 			path = Data.CurrentPlaying
 			showInfo(fmt.Sprintf("New Connection for Current-URL: [%s]", path))
+			Data.CurrentClients = append(Data.CurrentClients, r.RemoteAddr)
 		} else {
 			showInfo("No Cached Stream Info. Bye.")
 			httpStatusError(w, r, 404)
 			return
 		}
+	} else {
+		// need to wait till the ConnectionCount is 0
+		// waitForOtherStreamsToQuit = true
+		for len(Data.CurrentClients) > 0 {
+			time.Sleep(time.Millisecond * 200)
+		}
+
+		Data.CurrentChannelStarterIp = r.RemoteAddr
+		Data.CurrentKillSwitch = false
 	}
 
 	streamInfo, err := getStreamInfo(path)
@@ -139,6 +152,20 @@ func Stream(w http.ResponseWriter, r *http.Request) {
 		httpStatusError(w, r, 404)
 		return
 	}
+
+	// if waitForOtherStreamsToQuit == true {
+	// 	if c, ok := BufferClients.Load(streamInfo.PlaylistID + stream.MD5); ok {
+	// 		var clients = c.(ClientConnection)
+	// 		clients.Connection = clients.Connection + 1
+	// 		showInfo(fmt.Sprintf("Streaming Status:Channel: %s (Clients: %d)", stream.ChannelName, clients.Connection))
+
+	// 		BufferClients.Store(streamInfo.PlaylistID+stream.MD5, clients)
+	// 	}
+
+	// 	// now reset
+	// 	Data.CurrentChannelStarterIp = r.RemoteAddr
+	// 	Data.CurrentKillSwitch = false
+	// }
 
 	Data.CurrentPlaying = path
 

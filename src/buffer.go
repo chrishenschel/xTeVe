@@ -249,7 +249,7 @@ func bufferingStream(playlistID, streamingURL, channelName string, w http.Respon
 						var clients = c.(ClientConnection)
 
 						if clients.Error != nil || timeOut > 200 {
-							killClientConnection(streamID, stream.PlaylistID, false)
+							killClientConnection(streamID, stream.PlaylistID, false, r.RemoteAddr)
 							return
 						}
 
@@ -270,7 +270,7 @@ func bufferingStream(playlistID, streamingURL, channelName string, w http.Respon
 						select {
 
 						case <-cn.CloseNotify():
-							killClientConnection(streamID, playlistID, false)
+							killClientConnection(streamID, playlistID, false, r.RemoteAddr)
 							return
 
 						default:
@@ -279,7 +279,7 @@ func bufferingStream(playlistID, streamingURL, channelName string, w http.Respon
 								var clients = c.(ClientConnection)
 								if clients.Error != nil {
 									ShowError(clients.Error, 0)
-									killClientConnection(streamID, playlistID, false)
+									killClientConnection(streamID, playlistID, false, r.RemoteAddr)
 									return
 								}
 
@@ -294,7 +294,7 @@ func bufferingStream(playlistID, streamingURL, channelName string, w http.Respon
 					}
 
 					if _, err := os.Stat(stream.Folder); os.IsNotExist(err) {
-						killClientConnection(streamID, playlistID, false)
+						killClientConnection(streamID, playlistID, false, r.RemoteAddr)
 						return
 					}
 
@@ -304,8 +304,19 @@ func bufferingStream(playlistID, streamingURL, channelName string, w http.Respon
 					for _, f := range tmpFiles {
 
 						if _, err := os.Stat(stream.Folder); os.IsNotExist(err) {
-							killClientConnection(streamID, playlistID, false)
+							killClientConnection(streamID, playlistID, false, r.RemoteAddr)
 							return
+						}
+
+						// check if we are the master connection and if not if we should be killed
+						if Data.CurrentChannelStarterIp != r.RemoteAddr {
+							// we are not the master
+							if Data.CurrentKillSwitch == true {
+								// cya!
+								showInfo("Killing Connection from " + r.RemoteAddr)
+								killClientConnection(streamID, playlistID, false, r.RemoteAddr)
+								return
+							}
 						}
 
 						oldSegments = append(oldSegments, f)
@@ -352,7 +363,7 @@ func bufferingStream(playlistID, streamingURL, channelName string, w http.Respon
 
 									if err != nil {
 										file.Close()
-										killClientConnection(streamID, playlistID, false)
+										killClientConnection(streamID, playlistID, false, r.RemoteAddr)
 										return
 									}
 
@@ -390,7 +401,7 @@ func bufferingStream(playlistID, streamingURL, channelName string, w http.Respon
 			} else {
 
 				// Stream nicht vorhanden
-				killClientConnection(streamID, stream.PlaylistID, false)
+				killClientConnection(streamID, stream.PlaylistID, false, r.RemoteAddr)
 				showInfo(fmt.Sprintf("Streaming Status:Playlist: %s - Tuner: %d / %d", playlist.PlaylistName, len(playlist.Streams), playlist.Tuner))
 				return
 
@@ -449,10 +460,28 @@ func getTmpFiles(stream *ThisStream) (tmpFiles []string) {
 	return
 }
 
-func killClientConnection(streamID int, playlistID string, force bool) {
+func RemoveIndex(s []string, index int) []string {
+	return append(s[:index], s[index+1:]...)
+}
+
+func killClientConnection(streamID int, playlistID string, force bool, remoteAddr string) {
 
 	Lock.Lock()
 	defer Lock.Unlock()
+
+	if remoteAddr != "" && remoteAddr == Data.CurrentChannelStarterIp {
+		Data.CurrentChannelStarterIp = ""
+		Data.CurrentKillSwitch = true
+		Data.CurrentPlaying = ""
+	} else if remoteAddr != "" {
+		for i := range Data.CurrentClients {
+			if Data.CurrentClients[i] == remoteAddr {
+				Data.CurrentClients = RemoveIndex(Data.CurrentClients, i)
+				break
+			}
+		}
+
+	}
 
 	if p, ok := BufferInformation.Load(playlistID); ok {
 
@@ -684,7 +713,7 @@ func connectToStreamingServer(streamID int, playlistID string) {
 
 					addErrorToStream(err)
 
-					killClientConnection(streamID, playlistID, true)
+					killClientConnection(streamID, playlistID, true, "")
 					clientConnection(stream)
 
 					return
@@ -756,7 +785,7 @@ func connectToStreamingServer(streamID int, playlistID string) {
 				BufferInformation.Store(playlist.PlaylistID, playlist)
 				addErrorToStream(err)
 
-				killClientConnection(streamID, playlistID, true)
+				killClientConnection(streamID, playlistID, true, "")
 				clientConnection(stream)
 				resp.Body.Close()
 
