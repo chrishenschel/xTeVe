@@ -122,6 +122,16 @@ func Stream(w http.ResponseWriter, r *http.Request) {
 
 	var path = strings.Replace(r.RequestURI, "/stream/", "", 1)
 	//var stream = strings.SplitN(path, "-", 2)
+	if path == "current" {
+		if Data.CurrentPlaying != "" {
+			path = Data.CurrentPlaying
+			showInfo(fmt.Sprintf("New Connection for Current-URL: [%s]", path))
+		} else {
+			showInfo("No Cached Stream Info. Bye.")
+			httpStatusError(w, r, 404)
+			return
+		}
+	}
 
 	streamInfo, err := getStreamInfo(path)
 	if err != nil {
@@ -129,6 +139,8 @@ func Stream(w http.ResponseWriter, r *http.Request) {
 		httpStatusError(w, r, 404)
 		return
 	}
+
+	Data.CurrentPlaying = path
 
 	// If an UDPxy host is set, and the stream URL is multicast (i.e. starts with 'udp://@'),
 	// then streamInfo.URL needs to be rewritten to point to UDPxy.

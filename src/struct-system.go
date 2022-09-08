@@ -117,7 +117,8 @@ type GitStruct struct {
 
 // DataStruct : Alle Daten werden hier abgelegt. (Lineup, XMLTV)
 type DataStruct struct {
-	Cache struct {
+	CurrentPlaying string
+	Cache          struct {
 		Images      *imgcache.Cache
 		ImagesCache []string
 		ImagesFiles []string
