@@ -185,6 +185,7 @@ type XEPGChannelStruct struct {
 	FileM3UPath        string `json:"_file.m3u.path,required"`
 	GroupTitle         string `json:"group-title,required"`
 	Name               string `json:"name,required"`
+	NameNorm           string `json:"name_normalized,required"`
 	TvgID              string `json:"tvg-id,required"`
 	TvgLogo            string `json:"tvg-logo,required"`
 	TvgName            string `json:"tvg-name,required"`

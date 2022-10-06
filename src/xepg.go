@@ -62,8 +62,10 @@ func buildXEPG(background bool) {
 
 			go func() {
 
+				createXEPGChannelMapping()
 				createXEPGMapping()
 				createXEPGDatabase()
+				createXEPGChannelMapping()
 				mapping()
 				cleanupXEPG()
 				createXMLTVFile()
@@ -103,9 +105,9 @@ func buildXEPG(background bool) {
 			}()
 
 		case false:
-
 			createXEPGMapping()
 			createXEPGDatabase()
+			createXEPGChannelMapping()
 			mapping()
 			cleanupXEPG()
 
@@ -203,6 +205,58 @@ func updateXEPG(background bool) {
 	return
 }
 
+// Counting by channel names
+func createXEPGChannelMapping() {
+	var tmpMap = make(map[string]map[string]int)
+	var err error
+
+	for _, dxc := range Data.XEPG.Channels {
+
+		//var xepgChannel XEPGChannelStruct
+		var xepgChannel XEPGChannelStruct
+		err = json.Unmarshal([]byte(mapToJSON(dxc)), &xepgChannel)
+		// }
+
+		// for _, dsa := range Data.Streams.Active {
+
+		// 	var m3uChannel M3UChannelStructXEPG
+
+		//err = json.Unmarshal([]byte(mapToJSON(dsa)), &m3uChannel)
+		if err != nil {
+			return
+		}
+
+		if xepgChannel.TvgID == "" {
+			fmt.Println("No tvgID for:", xepgChannel.Name)
+			//xepgChannel.TvgID = "360_Minutes"
+
+			continue
+		}
+
+		//var val string
+		if _, ok := tmpMap[xepgChannel.NameNorm]; ok {
+			//do something here
+			if val, ok := tmpMap[xepgChannel.NameNorm][xepgChannel.TvgID]; ok {
+				//do something here
+				tmpMap[xepgChannel.NameNorm][xepgChannel.TvgID] = val + 1
+			} else {
+				tmpMap[xepgChannel.NameNorm][xepgChannel.TvgID] = 1
+			}
+		} else {
+			tmpMap[xepgChannel.NameNorm] = make(map[string]int)
+			tmpMap[xepgChannel.NameNorm][xepgChannel.TvgID] = 1
+		}
+	}
+
+	for key := range tmpMap {
+		fmt.Println("==================")
+		fmt.Println("XMLTV for:", key)
+		for key2, element2 := range tmpMap[key] {
+			fmt.Println("XMLTV:", key2, "=>", "Count:", element2)
+		}
+	}
+}
+
 // Mapping Menü für die XMLTV Dateien erstellen
 func createXEPGMapping() {
 
@@ -283,7 +337,7 @@ func createXEPGMapping() {
 
 	// Auswahl für den Dummy erstellen
 	var dummy = make(map[string]interface{})
-	var times = []string{"30", "60", "90", "120", "180", "240", "360"}
+	var times = []string{"30", "60", "90", "120", "180", "240", "360", "720"}
 
 	for _, i := range times {
 
@@ -497,6 +551,27 @@ func createXEPGDatabase() (err error) {
 			newChannel.XmltvFile = ""
 			newChannel.XMapping = ""
 
+			// additional normalize some extra infos in the channel name
+			var channelNameNormalized string = m3uChannel.Name
+			channelNameNormalized = strings.Replace(channelNameNormalized, `HDʀᴀᴡ`, "", 1)
+			channelNameNormalized = strings.Replace(channelNameNormalized, `²`, "", 1)
+			channelNameNormalized = strings.Replace(channelNameNormalized, `ᴄᴀʙʟᴇ`, "", 1)
+			channelNameNormalized = strings.Replace(channelNameNormalized, `FEED`, "", 1)
+			channelNameNormalized = strings.Replace(channelNameNormalized, `HEVC`, "", 1)
+			channelNameNormalized = strings.Replace(channelNameNormalized, `FHD*`, "", 1)
+			channelNameNormalized = strings.Replace(channelNameNormalized, `FHD+`, "", 1)
+			channelNameNormalized = strings.Replace(channelNameNormalized, `FHD`, "", 1)
+			channelNameNormalized = strings.Replace(channelNameNormalized, `HD*`, "", 1)
+			channelNameNormalized = strings.Replace(channelNameNormalized, `HD`, "", 1)
+			channelNameNormalized = strings.Replace(channelNameNormalized, `SD`, "", 1)
+			channelNameNormalized = strings.Replace(channelNameNormalized, `(web)`, "", 1)
+			channelNameNormalized = strings.Replace(channelNameNormalized, `(mobil)`, "", 1)
+			channelNameNormalized = strings.TrimSpace(channelNameNormalized)
+			channelNameNormalized = strings.ToLower(channelNameNormalized)
+			channelNameNormalized = strings.Replace(channelNameNormalized, `(web)`, "", 1)
+			channelNameNormalized = strings.Replace(channelNameNormalized, `(mobil)`, "", 1)
+			newChannel.NameNorm = channelNameNormalized
+
 			if len(m3uChannel.UUIDKey) > 0 {
 				newChannel.UUIDKey = m3uChannel.UUIDKey
 				newChannel.UUIDValue = m3uChannel.UUIDValue
@@ -542,8 +617,11 @@ func mapping() (err error) {
 				var tvgID = xepgChannel.TvgID
 
 				// Default für neuen Kanal setzen
-				xepgChannel.XmltvFile = "-"
-				xepgChannel.XMapping = "-"
+				//xepgChannel.XmltvFile = "-"
+				//xepgChannel.XMapping = "-"
+				xepgChannel.XMapping = "720_Minutes"
+				xepgChannel.XmltvFile = "xTeVe Dummy"
+				xepgChannel.XActive = true
 
 				Data.XEPG.Channels[xepg] = xepgChannel
 
@@ -705,11 +783,97 @@ func createXMLTVFile() (err error) {
 
 				*tmpProgram, err = getProgramData(xepgChannel)
 				if err == nil {
+					// dummy programs are always till the end. so do not worry about them.
+					if xepgChannel.XmltvFile != "xTeVe Dummy" {
 
-					for _, program := range tmpProgram.Program {
-						xepgXML.Program = append(xepgXML.Program, program)
+						// sorting the Program by start times.
+						sort.Slice(tmpProgram.Program, func(a, b int) bool {
+							var aT, _ = time.Parse("20060102150405", strings.Split(tmpProgram.Program[a].Start, " ")[0])
+							var aB, _ = time.Parse("20060102150405", strings.Split(tmpProgram.Program[b].Start, " ")[0])
+							return aT.Before(aB)
+						})
+
+						// Start dummy
+						var currentTime = time.Now()
+						//var dateArray = strings.Fields(currentTime.String())
+						//var offset = " " + dateArray[2]
+						var currentDay = currentTime.Format("20060102")
+						var startTime, _ = time.Parse("20060102150405", currentDay+"000000")
+						//var epgStartTime = startTime.Add(time.Hour * time.Duration(1*24))
+						//var strStartTime = startTime.Format("20060102150405") + offset
+						//var testTime, _ = time.Parse("20060102150405 +0200", strStartTime)
+						//showInfo("XEPG:" + testTime.String())
+
+						// strStartTime = 				 2022-10-05 00:00:00 +0200
+						// tmpProgram.Program[0].Start = 2022-10-04 02:00:01 +0200
+						// StartTime is bigger.
+						var fakeProgs []*Program
+
+						// checking if we have program entries. if yes we compare if they are complete
+						if len(tmpProgram.Program) > 0 {
+							// slice the text into actual time:
+							var progStartTime, _ = time.Parse("20060102150405", strings.Split(tmpProgram.Program[0].Start, " ")[0])
+
+							//if strStartTime < tmpProgram.Program[0].Start {
+							if startTime.Before(progStartTime) {
+								// we need to create a dummy till the start time
+								var epg Program = createDummyProgramEntry(xepgChannel, startTime, progStartTime)
+								fakeProgs = append(fakeProgs, &epg)
+								showInfo("XEPG:" + fmt.Sprintf("Creating Dummy XEPG entry for %s (%s - %s)", xepgChannel.Name, "NOW", tmpProgram.Program[0].Start))
+								//showInfo("XEPG:" + "Creating dummy XEPG entry for " + xepgChannel.Name)
+							}
+						} else {
+							// if it is empty we probably want to create dummy for this channel?
+						}
+
+						var sLastEndTime = ""
+						for _, program := range tmpProgram.Program {
+							if sLastEndTime == "" {
+								sLastEndTime = program.Stop
+								continue
+							}
+
+							// if the next program does not start after the last one ended we have to create a dummy.
+							if sLastEndTime != program.Start {
+								showInfo("XEPG:" + fmt.Sprintf("Creating Dummy XEPG entry for %s (%s - %s)", xepgChannel.Name, sLastEndTime, program.Start))
+								var progEndTime, _ = time.Parse("20060102150405", strings.Split(sLastEndTime, " ")[0])
+								var progStartTime, _ = time.Parse("20060102150405", strings.Split(program.Start, " ")[0])
+								var epg Program = createDummyProgramEntry(xepgChannel, progEndTime, progStartTime)
+								fakeProgs = append(fakeProgs, &epg)
+							}
+
+							sLastEndTime = program.Stop
+							//showInfo("XEPG:" + fmt.Sprintf("Program-Info (%s)", program.))
+							// if program.Channel == "1111" {
+							// 	var title []*Title = program.Title
+							// 	showInfo("XEPG:" + fmt.Sprintf("Program Debug: (%s) %s %s (%s)", program.Channel, program.Start, program.Stop, title[0].Value))
+							// }
+						}
+						// calculate and fill missing xepg spots for the next 4 days.
+						// Channel: "1203"
+						// Start: "20221005000000 +0200"
+						// Stop: "20221005120000 +0200"
+
+						// adding the newly generated fake programs to the temporary array
+						for _, fake := range fakeProgs {
+							tmpProgram.Program = append(tmpProgram.Program, fake)
+						}
 					}
 
+					// sort the temp array by time
+					// sort.Slice(tmpProgram.Program, func(a, b int) bool {
+					// 	return tmpProgram.Program[a].Start < tmpProgram.Program[b].Start
+					// })
+					sort.Slice(tmpProgram.Program, func(a, b int) bool {
+						var aT, _ = time.Parse("20060102150405", strings.Split(tmpProgram.Program[a].Start, " ")[0])
+						var aB, _ = time.Parse("20060102150405", strings.Split(tmpProgram.Program[b].Start, " ")[0])
+						return aT.Before(aB)
+					})
+
+					for _, program := range tmpProgram.Program {
+						//showInfo("XEPG:" + fmt.Sprintf("Program-Info (%s)", program.))
+						xepgXML.Program = append(xepgXML.Program, program)
+					}
 				}
 
 			}
@@ -762,6 +926,7 @@ func getProgramData(xepgChannel XEPGChannelStruct) (xepgXML XMLTV, err error) {
 
 			// Title
 			program.Title = xmltvProgram.Title
+			// maybe add some more infos? if the title is "Sendepause", "Derzeit keine Sendung"
 
 			// Sub title (Untertitel)
 			program.SubTitle = xmltvProgram.SubTitle
@@ -818,6 +983,40 @@ func getProgramData(xepgChannel XEPGChannelStruct) (xepgXML XMLTV, err error) {
 	}
 
 	return
+}
+
+func createDummyProgramEntry(xepgChannel XEPGChannelStruct, epgStartTime time.Time, epgStopTime time.Time) (prog Program) {
+	var imgc = Data.Cache.Images
+	var currentTime = time.Now()
+	var dateArray = strings.Fields(currentTime.String())
+	var offset = " " + dateArray[2]
+	var epg Program
+	poster := Poster{}
+
+	// if we are too stupid to put the right input we will double check here.
+	if epgStopTime.Before(epgStartTime) {
+		var tmp = epgStartTime
+		epgStartTime = epgStopTime
+		epgStopTime = tmp
+	}
+
+	epg.Channel = xepgChannel.XMapping
+	epg.Start = epgStartTime.Format("20060102150405") + offset
+	epg.Stop = epgStopTime.Format("20060102150405") + offset
+	epg.Title = append(epg.Title, &Title{Value: xepgChannel.XName + " (" + epgStartTime.Weekday().String()[0:2] + ". " + epgStartTime.Format("15:04") + " - " + epgStopTime.Weekday().String()[0:2] + ". " + epgStopTime.Format("15:04") + ")", Lang: "en"})
+	epg.Desc = append(epg.Desc, &Desc{Value: xepgChannel.Name + " NO EPG " + epgStartTime.Weekday().String() + " " + epgStartTime.Format("15:04") + " - " + epgStopTime.Weekday().String() + " " + epgStopTime.Format("15:04"), Lang: "en"})
+
+	if Settings.XepgReplaceMissingImages == true {
+		poster.Src = imgc.Image.GetURL(xepgChannel.TvgLogo)
+		epg.Poster = append(epg.Poster, poster)
+	}
+
+	if xepgChannel.XCategory != "Movie" {
+		epg.EpisodeNum = append(epg.EpisodeNum, &EpisodeNum{Value: epgStartTime.Format("2006-01-02 15:04:05"), System: "original-air-date"})
+	}
+
+	epg.New = &New{Value: ""}
+	return epg
 }
 
 // Dummy Daten erstellen (createXMLTVFile)
